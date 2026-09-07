@@ -26,10 +26,18 @@ jobs:
 
       - uses: actions/configure-pages@v5
 
+      # Stage only what belongs on the public site. Uploading the repo root
+      # would publish infra/ (Terraform + Lambda source) to the live site.
+      - name: Stage site
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+          cp .nojekyll _site/
+
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
 
       - id: deployment
         uses: actions/deploy-pages@v4

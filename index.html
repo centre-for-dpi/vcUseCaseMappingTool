@@ -1407,20 +1407,42 @@ function renderPriority(){
 }
 
 // CDPI SUBMISSION — automatic, no manual "submit" button.
-// TODO(CDPI): replace with the real collection endpoint once provided.
-var CDPI_SUBMIT_ENDPOINT = ''; // e.g. 'https://api.cdpi.example.org/use-cases/submit'
+// Every export posts the case JSON plus the exported file to the collection
+// endpoint, which lands them in S3. Set this to the `submit_endpoint` output of
+// infra/ (`terraform -chdir=infra output submit_endpoint`).
+var CDPI_SUBMIT_ENDPOINT = ''; // e.g. 'https://abc123.execute-api.ap-south-1.amazonaws.com/submit'
 var CDPI_SUBMIT_LOG_KEY = 'vc-uc-cdpi-log';
-function submitToCDPI(caseObj,trigger){
+var CDPI_MAX_FILE_BYTES = 4194304; // keep in sync with max_file_bytes in infra/variables.tf
+
+// Chunked, because String.fromCharCode.apply overflows the argument limit on
+// anything beyond a few tens of KB.
+function bytesToBase64(bytes){
+  var CHUNK=0x8000,parts=[];
+  for(var i=0;i<bytes.length;i+=CHUNK){parts.push(String.fromCharCode.apply(null,bytes.subarray(i,i+CHUNK)));}
+  return btoa(parts.join(''));
+}
+function cdpiFile(filename,contentType,bytes){
+  if(!bytes||!bytes.length||bytes.length>CDPI_MAX_FILE_BYTES)return null;
+  return {filename:filename,contentType:contentType,encoding:'base64',data:bytesToBase64(bytes)};
+}
+function cdpiText(str){return new TextEncoder().encode(str);}
+function caseFileSlug(c){return 'vc-case-'+(((c&&c.name)||'case').toLowerCase().replace(/[^a-z0-9]+/g,'-'));}
+function submitToCDPI(caseObj,trigger,files){
   if(!caseObj)return Promise.resolve(false);
   if(!CDPI_SUBMIT_ENDPOINT){
     // No endpoint configured yet — skip silently so the tool keeps working offline.
     return Promise.resolve(false);
   }
-  var payload=JSON.stringify(Object.assign({},caseObj,{
+  var payload=JSON.stringify({
+    schema:'cdpi.usecase.submission.v1',
+    caseId:caseObj.id||'',
+    caseName:caseObj.name||'',
     submitterRole:localStorage.getItem('vc-uc-persona')||caseObj.submitterRole||'',
-    submittedTrigger:trigger||'unknown',
-    submittedAt:new Date().toISOString()
-  }));
+    trigger:trigger||'unknown',
+    submittedAt:new Date().toISOString(),
+    'case':caseObj,
+    files:(files||[]).filter(Boolean)
+  });
   return fetch(CDPI_SUBMIT_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json'},body:payload})
     .then(function(r){markCDPISubmission(caseObj.id,r.ok);return r.ok;})
     .catch(function(){markCDPISubmission(caseObj.id,false);return false;});
@@ -1433,8 +1455,14 @@ function markCDPISubmission(caseId,ok){
   }catch(e){}
 }
 
-function exportJSON(){collectFields();submitToCDPI(currentCase,'export_json');var blob=new Blob([JSON.stringify(currentCase,null,2)],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='vc-case-'+(currentCase.name||'case').toLowerCase().replace(/[^a-z0-9]+/g,'-')+'.json';a.click();}
-function exportCaseJSON(idx){submitToCDPI(cases[idx],'export_json');var blob=new Blob([JSON.stringify(cases[idx],null,2)],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='vc-case-'+(cases[idx].name||'case').toLowerCase().replace(/[^a-z0-9]+/g,'-')+'.json';a.click();}
+function downloadJSONCase(c,trigger){
+  var json=JSON.stringify(c,null,2),fname=caseFileSlug(c)+'.json';
+  submitToCDPI(c,trigger,[cdpiFile(fname,'application/json',cdpiText(json))]);
+  var blob=new Blob([json],{type:'application/json'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname;a.click();
+}
+function exportJSON(){collectFields();downloadJSONCase(currentCase,'export_json');}
+function exportCaseJSON(idx){downloadJSONCase(cases[idx],'export_json');}
 function importCase(){document.getElementById('import-file').click();}
 function handleImport(event){
   var file=event.target.files[0];if(!file)return;
@@ -1444,7 +1472,6 @@ function handleImport(event){
 }
 function exportExcel(){
   collectFields();if(typeof XLSX==='undefined'){alert('Excel export not available.');return;}
-  submitToCDPI(currentCase,'export_excel');
   var c=currentCase;
   var rows=[['Field','Value'],['',''],['USE CASE',''],['Name',c.name],['Credential',c.credential],['Issuing entity',c.issuer],['Country',c.country],['Scope',c.scope],['',''],['CONTEXT',''],['Citizen persona',c.ctx&&c.ctx.persona],['Sectors',c.ctx&&c.ctx.sectors],['Problem today',c.ctx&&c.ctx.problem],['Digital access',c.ctx&&c.ctx.digitalAccess],['Digital notes',c.ctx&&c.ctx.digitalNotes],['',''],['ISSUANCE AS-IS',''],['Channel',c.asisIss&&c.asisIss.channel],['Total time (hrs)',c.asisIss&&c.asisIss.time],['Friction',c.asisIss&&c.asisIss.friction],['',''],['ISSUANCE TO-BE',''],['Time (hrs)',c.tobeIss&&c.tobeIss.time],['Channel',c.tobeIss&&c.tobeIss.channel],['Changes citizen',c.tobeIss&&c.tobeIss.citizen],['Changes entity',c.tobeIss&&c.tobeIss.institution],['',''],['VERIFICATION AS-IS',''],['Service',c.asisVf&&c.asisVf.service],['Who verifies',c.asisVf&&c.asisVf.who],['Channel',c.asisVf&&c.asisVf.channel],['Time (hrs)',c.asisVf&&c.asisVf.time],['People',c.asisVf&&c.asisVf.people],['Friction',c.asisVf&&c.asisVf.friction],['',''],['VERIFICATION TO-BE',''],['Time (hrs)',c.tobeVf&&c.tobeVf.time],['Channel',c.tobeVf&&c.tobeVf.channel],['Benefit citizen',c.tobeVf&&c.tobeVf.citizen],['Benefit verifier',c.tobeVf&&c.tobeVf.verifier],['',''],['INDICATORS',''],['Citizens/year',c.kpi&&c.kpi.volume],['Frequency',c.kpi&&c.kpi.freq],['Segment',c.kpi&&c.kpi.segment],['Verifs/transaction',c.kpi&&c.kpi.verifs],['Citizen time AS-IS',c.kpi&&c.kpi.timeCitizenAsis],['Citizen time TO-BE',c.kpi&&c.kpi.timeCitizenTobe],['Entity time AS-IS',c.kpi&&c.kpi.timeInstAsis],['Entity time TO-BE',c.kpi&&c.kpi.timeInstTobe],['Cost',c.kpi&&c.kpi.cost],['Error rate',c.kpi&&c.kpi.error],['Fraud',c.kpi&&c.kpi.fraud],['Problems citizen',c.kpi&&c.kpi.probCitizen],['Problems verifier',c.kpi&&c.kpi.probVerifier],['Problems system',c.kpi&&c.kpi.probSystem],['',''],['IMPACT',''],['Time saved',c.imp&&c.imp.citizenTime],['Steps eliminated',c.imp&&c.imp.citizenSteps],['Who benefits',c.imp&&c.imp.citizenGroup],['Channel change',c.imp&&c.imp.channelChange],['Staff freed',c.imp&&c.imp.entityStaff],['Error reduction',c.imp&&c.imp.entityErrors],['Cost reduction',c.imp&&c.imp.entityCost],['Scale',c.imp&&c.imp.countryScale],['Inclusion',c.imp&&c.imp.countryInclusion],['Agenda',c.imp&&c.imp.countryAgenda],['',''],['LEGAL',''],['Framework',c.legal&&c.legal.framework],['Reform',c.legal&&c.legal.reform],['Notes',c.legal&&c.legal.notes],['',''],['TECHNICAL',''],['System',c.tech&&c.tech.system],['Type',(c.tech&&c.tech.type==='other'&&c.tech.typeOther)?c.tech.typeOther:(c.tech&&c.tech.type)],['Size',c.tech&&c.tech.size],['Owner',c.tech&&c.tech.owner],['Quality',c.tech&&c.tech.quality],['API',c.tech&&c.tech.api],['Pilot',c.tech&&c.tech.pilot],['Production',c.tech&&c.tech.prod],['Hosting',c.tech&&c.tech.env],['Stack',c.tech&&c.tech.stack],['Security',c.tech&&c.tech.security],['Verifier check',c.tech&&c.tech.vfSystem],['Verifier needs',c.tech&&c.tech.vfIntegration],['Notes',c.tech&&c.tech.notes],['',''],['SUMMARY',''],['Priority',c.summary&&c.summary.priority]];
   var ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=[{wch:30},{wch:70}];
@@ -1465,7 +1492,14 @@ function exportExcel(){
   }
   exportUnifiedSheet('iss','Issuance');
   exportUnifiedSheet('vf','Verification');
-  XLSX.writeFile(wb,'vc-case-'+(c.name||'case').toLowerCase().replace(/[^a-z0-9]+/g,'-')+'.xlsx');
+  // Write to bytes rather than XLSX.writeFile so the same bytes can be both
+  // uploaded and handed to the browser as a download.
+  var XLSX_MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  var fname=caseFileSlug(c)+'.xlsx';
+  var out=new Uint8Array(XLSX.write(wb,{bookType:'xlsx',type:'array'}));
+  submitToCDPI(c,'export_excel',[cdpiFile(fname,XLSX_MIME,out)]);
+  var blob=new Blob([out],{type:XLSX_MIME});
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname;a.click();
 }
 function esc(s){return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function selText(id){var el=document.getElementById(id);if(!el||!el.selectedOptions)return '';var o=el.selectedOptions[0];return (o&&o.value)?o.textContent:'';}
@@ -1712,10 +1746,25 @@ function buildPrintReport(){
   document.getElementById('print-report').innerHTML=html;
 }
 
+// The PDF itself is produced by the browser's print engine, so its bytes are
+// never available to the page. What we can capture faithfully is the report as
+// rendered for printing — uploaded as a self-contained HTML snapshot.
+function buildPrintSnapshot(){
+  var rep=document.getElementById('print-report');
+  if(!rep)return '';
+  var css='',styles=document.getElementsByTagName('style');
+  for(var i=0;i<styles.length;i++)css+=styles[i].innerHTML;
+  return '<!DOCTYPE html>\n<html lang="'+(lang||'en')+'"><head><meta charset="utf-8">'+
+    '<title>'+esc((currentCase&&currentCase.name)||'VC use case')+'</title>'+
+    '<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">'+
+    '<style>'+css+'</style>'+
+    '<style>#print-report{display:block!important;padding:32px 20px}</style>'+
+    '</head><body><div id="print-report">'+rep.innerHTML+'</div></body></html>';
+}
 function printCase(){
   collectFields();fillSummary();
-  submitToCDPI(currentCase,'export_pdf');
   buildPrintReport();
+  submitToCDPI(currentCase,'export_pdf',[cdpiFile(caseFileSlug(currentCase)+'.html','text/html',cdpiText(buildPrintSnapshot()))]);
   window.print();
 }
 function copyCard(){
