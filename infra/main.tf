@@ -133,7 +133,7 @@ resource "aws_lambda_function" "ingest" {
   function_name    = "${local.name}-ingest"
   role             = aws_iam_role.ingest.arn
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   filename         = data.archive_file.ingest.output_path
   source_code_hash = data.archive_file.ingest.output_base64sha256
   timeout          = 15
@@ -253,7 +253,7 @@ resource "aws_lambda_function" "notifier" {
   function_name    = "${local.name}-notifier"
   role             = aws_iam_role.notifier.arn
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   filename         = data.archive_file.notifier.output_path
   source_code_hash = data.archive_file.notifier.output_base64sha256
   timeout          = 10

@@ -21,23 +21,30 @@ function fmtBytes(n) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+// Submissions come from an unauthenticated endpoint, so every user-supplied
+// value is escaped before it reaches mrkdwn: otherwise a case named
+// "<!channel>" pings the whole channel, and "<url|text>" forges a link.
+function esc(value) {
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 async function readManifest(bucket, key) {
   const res = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   return JSON.parse(await res.Body.transformToString());
 }
 
 function buildMessage(m, bucket, region) {
-  const name = m.caseName || m.caseId || m.submissionId;
-  const trigger = TRIGGER_LABELS[m.trigger] || m.trigger || 'Submission';
+  const name = esc(m.caseName || m.caseId || m.submissionId);
+  const trigger = esc(TRIGGER_LABELS[m.trigger] || m.trigger || 'Submission');
   const details = [
-    m.country ? `*Country:* ${m.country}` : null,
-    m.submitterRole ? `*Role:* ${m.submitterRole}` : null,
+    m.country ? `*Country:* ${esc(m.country)}` : null,
+    m.submitterRole ? `*Role:* ${esc(m.submitterRole)}` : null,
     `*Trigger:* ${trigger}`,
-    `*Received:* ${m.receivedAt}`,
+    `*Received:* ${esc(m.receivedAt)}`,
   ].filter(Boolean).join('\n');
 
   const fileLines = (m.files || []).length
-    ? m.files.map((f) => `• \`${f.filename}\` (${fmtBytes(f.bytes)})`).join('\n')
+    ? m.files.map((f) => `• \`${esc(f.filename)}\` (${fmtBytes(f.bytes)})`).join('\n')
     : '_case.json only — no attachment for this trigger_';
 
   const consoleUrl =

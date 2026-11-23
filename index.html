@@ -1412,7 +1412,7 @@ function renderPriority(){
 // infra/ (`terraform -chdir=infra output submit_endpoint`).
 var CDPI_SUBMIT_ENDPOINT = ''; // e.g. 'https://abc123.execute-api.ap-south-1.amazonaws.com/submit'
 var CDPI_SUBMIT_LOG_KEY = 'vc-uc-cdpi-log';
-var CDPI_MAX_FILE_BYTES = 4194304; // keep in sync with max_file_bytes in infra/variables.tf
+var CDPI_MAX_FILE_BYTES = 3145728; // keep in sync with max_file_bytes in infra/variables.tf
 
 // Chunked, because String.fromCharCode.apply overflows the argument limit on
 // anything beyond a few tens of KB.

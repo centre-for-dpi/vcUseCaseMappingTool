@@ -25,21 +25,26 @@ variable "slack_webhook_url" {
 variable "allowed_origins" {
   description = "Origins allowed to POST to the submit endpoint (browser CORS)."
   type        = list(string)
+  # Pages serves the tool from the custom domain. The http:// entry covers
+  # visitors who arrive before "Enforce HTTPS" is switched on.
   default = [
-    "https://centre-for-dpi.github.io",
+    "https://vc.use-case-mapping.cdpi.dev",
+    "http://vc.use-case-mapping.cdpi.dev",
   ]
 }
 
 variable "max_file_bytes" {
   description = "Largest single attachment accepted, in decoded bytes."
   type        = number
-  default     = 4194304 # 4 MiB
+  # Lambda caps a synchronous request at 6 MB. Base64 inflates ~33%, so 3 MiB
+  # decoded (~4.2 MB encoded) leaves room for the case JSON alongside it.
+  default = 3145728 # 3 MiB
 }
 
 variable "max_files_per_submission" {
-  description = "Largest number of attachments accepted in one submission."
+  description = "Largest number of attachments accepted in one submission. Each export sends one; raising this needs a total-size check to stay under Lambda's 6 MB request cap."
   type        = number
-  default     = 5
+  default     = 1
 }
 
 variable "throttle_rate" {

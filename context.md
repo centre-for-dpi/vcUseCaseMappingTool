@@ -143,12 +143,10 @@ Move to an S3 backend with DynamoDB locking before a second person applies.
 Note that `slack_webhook_url` is marked sensitive but still lands in state —
 whichever backend is used needs encryption.
 
-**Local development origins.** `allowed_origins` currently lists only
-`https://centre-for-dpi.github.io`, which is now wrong on two counts: the repo
-was renamed to `vcUseCaseMappingTool`, and Pages serves the tool from the custom
-domain `vc.use-case-mapping.cdpi.dev`, so that is the origin the browser sends.
-`infra/variables.tf` and `infra/terraform.tfvars.example` both need updating
-before apply, plus `http://localhost:<port>` for local testing.
+**Allowed origins.** `allowed_origins` defaults to the custom domain
+`vc.use-case-mapping.cdpi.dev` over both `https://` and `http://`, because Pages
+does not enforce HTTPS yet. Once "Enforce HTTPS" is on, the `http://` entry can
+go. Add `http://localhost:<port>` in `terraform.tfvars` for local testing.
 
 ## Known gaps
 
@@ -165,9 +163,10 @@ before apply, plus `http://localhost:<port>` for local testing.
 - **No dedupe.** Exporting the same case four times produces four submissions.
   Intentional — each carries its own trigger and timestamp — but consumers need
   to group by `caseId` rather than assume one submission per case.
-- **Payload ceiling.** Attachments are capped at 4 MiB decoded, 5 per
+- **Payload ceiling.** Attachments are capped at 3 MiB decoded, 1 per
   submission (`max_file_bytes`, `max_files_per_submission`). Base64 inflates
-  ~33%, and API Gateway hard-caps payloads at 10 MB. Typical exports are tens of
+  ~33%, and Lambda hard-caps a synchronous request at 6 MB (tighter than API
+  Gateway's 10 MB). Typical exports are tens of
   KB, so there is comfortable headroom, but a very large case would be rejected
   client-side by `cdpiFile()` returning `null` — the export still downloads, it
   just doesn't upload. Presigned direct-to-S3 uploads would remove the ceiling

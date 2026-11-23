@@ -12,8 +12,8 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 
 const s3 = new S3Client({});
 const BUCKET = process.env.BUCKET;
-const MAX_FILE_BYTES = Number(process.env.MAX_FILE_BYTES || 4194304);
-const MAX_FILES = Number(process.env.MAX_FILES || 5);
+const MAX_FILE_BYTES = Number(process.env.MAX_FILE_BYTES || 3145728);
+const MAX_FILES = Number(process.env.MAX_FILES || 1);
 
 const ALLOWED_CONTENT_TYPES = new Set([
   'application/json',
