@@ -143,10 +143,10 @@ Move to an S3 backend with DynamoDB locking before a second person applies.
 Note that `slack_webhook_url` is marked sensitive but still lands in state —
 whichever backend is used needs encryption.
 
-**Allowed origins.** `allowed_origins` defaults to the custom domain
-`vc.use-case-mapping.cdpi.dev` over both `https://` and `http://`, because Pages
-does not enforce HTTPS yet. Once "Enforce HTTPS" is on, the `http://` entry can
-go. Add `http://localhost:<port>` in `terraform.tfvars` for local testing.
+**Allowed origins.** `allowed_origins` defaults to
+`https://vc.use-case-mapping.cdpi.dev` only; Pages enforces HTTPS, so plain
+`http://` visitors are redirected before they can submit. Add
+`http://localhost:<port>` in `terraform.tfvars` for local testing.
 
 ## Known gaps
 
