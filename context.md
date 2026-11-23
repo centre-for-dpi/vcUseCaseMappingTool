@@ -11,14 +11,15 @@ what has to happen to make it live, and the decisions still outstanding.
 | Auto-deploy on merge to `main` | **Working** — `.github/workflows/deploy.yml` |
 | Export → S3 → Slack pipeline | **Applied** 2026-11-23 in account `770017829617`, `ap-south-1` |
 | `CDPI_SUBMIT_ENDPOINT` | **Set** to `https://70lz6ddo2k.execute-api.ap-south-1.amazonaws.com/submit` |
+| Viewer from Slack | **Live** — each message has a signed *View use case* button (`GET /view`) |
+| Terraform state | **S3** — `s3://cdpi-terraform-state-770017829617/vc-use-case-mapping-tool/infra.tfstate`, native locking |
+| Budget | **$100/month** on `Project=vc-use-case-mapping-tool`, alerts to antony@cdpi.dev — **counts $0 until the tag is activated** (see below) |
 
 Smoke tests passed on apply: a valid submission landed in
 `cdpi-usecase-submissions-770017829617` and posted to Slack; a disallowed
 content type got 415 and a second attachment got 413.
 
-Terraform state is local, in `infra/terraform.tfstate` on the applier's
-machine (gitignored). Steps 1–3 below are done; they stay as the record of how
-to redo it.
+Steps 1–3 below are done; they stay as the record of how to redo it.
 
 ## What it does once live
 
@@ -66,10 +67,11 @@ terraform apply
 Uses the local `cdpi` AWS profile in `ap-south-1`. Whoever applies needs create
 permissions for S3, Lambda, IAM roles, API Gateway and CloudWatch Logs.
 
-**State lives on the applier's laptop.** `terraform.tfstate` is gitignored, so
-the next person to run `apply` from a clean checkout will try to recreate
-everything. Before more than one person touches this, move to an S3 backend —
-see *Outstanding decisions*.
+**State lives in S3** (`cdpi-terraform-state-770017829617`, versioned,
+encrypted, TLS-only, locked with `use_lockfile`), so anyone with access can
+`terraform init` from a clean checkout. `terraform.tfvars` is still local and
+gitignored: a second applier needs the Slack webhook from the first, or can set
+`TF_VAR_slack_webhook_url`.
 
 ### 3. Wire the endpoint into the tool
 
@@ -117,31 +119,45 @@ immediately, exports keep working, nothing else changes. `terraform destroy`
 removes the infrastructure, but the bucket must be emptied first (versioning is
 on) and **that deletes every submission received so far**.
 
+## Decisions
+
+**Retention: forever.** Submissions never expire. Superseded object versions
+(only produced by an overwrite or delete, which the pipeline never does) still
+expire after 90 days.
+
+**Submitter IP: kept.** `manifest.json` records `sourceIp` and `userAgent`. The
+viewer does not return them; they are readable in S3 only.
+
+**Viewing from Slack.** Each Slack message carries a *View use case* button —
+a link into the tool with an HMAC signature of that submission's prefix in the
+`#fragment`. The tool fetches `GET /view`, renders the case as the same report
+the PDF export prints, and offers *Save as PDF* plus a download of the
+original export (JSON, Excel, or the HTML snapshot of the PDF). Nothing is
+saved to the viewer's browser or resubmitted. Anyone holding a link can open
+that one case; nobody can list or guess others. Revoke every link at once with
+`terraform apply -replace=random_password.view_signing_key`.
+
+**Budget.** `aws_budgets_budget.monthly` alerts antony@cdpi.dev at 80% and
+100% of actual spend and when spend is forecast past 100% of $100. It filters
+on the `Project` tag, which this member account cannot activate itself:
+**someone with billing access to the management account `730335413791` must
+activate it** (Billing → Cost allocation tags → `Project` → Activate). Until
+then the budget counts $0 and never alerts.
+
 ## Outstanding decisions
 
-**Authentication.** The endpoint is unauthenticated. Protection is the CORS
-origin allowlist plus API Gateway throttling. CORS stops another site's page
-from posting; it does **not** stop a direct scripted POST — anyone who reads
-the published `index.html` has the URL. Acceptable for low-stakes collection,
-not if submissions are ever treated as trustworthy. Cheapest fix is a shared
-secret header checked in the ingest Lambda; the real fix is a JWT authorizer.
-Needs a decision before this is publicised.
+**Authentication.** The submit endpoint is unauthenticated. Protection is the
+CORS origin allowlist plus API Gateway throttling. CORS stops another site's
+page from posting; it does **not** stop a direct scripted POST — anyone who
+reads the published `index.html` has the URL. Acceptable for low-stakes
+collection, not if submissions are ever treated as trustworthy. Cheapest fix is
+a shared secret header checked in the ingest Lambda; the real fix is a JWT
+authorizer.
 
 **Spend ceiling.** At the configured 5 req/s throttle the theoretical abuse
 ceiling is ~13M submissions/month ≈ **$320**. Realistic volumes cost cents (see
-below). Lowering `throttle_rate` and adding a billing alarm both cap this;
-neither is in this PR.
-
-**PII and retention.** Use cases may name real people, institutions and
-processes. Currently: encrypted at rest (SSE-S3), private bucket, versions
-expire at 90 days, objects never expire. No decision has been made on who may
-read the bucket, how long submissions are kept, or whether the Slack message
-should carry the case name. Worth settling before real data lands.
-
-**Terraform state backend.** Local state is fine for one person applying once.
-Move to an S3 backend with DynamoDB locking before a second person applies.
-Note that `slack_webhook_url` is marked sensitive but still lands in state —
-whichever backend is used needs encryption.
+below). The budget above alerts on it but does not stop it; lowering
+`throttle_rate` would.
 
 **Allowed origins.** `allowed_origins` defaults to
 `https://vc.use-case-mapping.cdpi.dev` only; Pages enforces HTTPS, so plain
@@ -202,9 +218,10 @@ storage counts are exact.
 | Path | What it is |
 | --- | --- |
 | `index.html` | The tool. Submission code is the `CDPI SUBMISSION` block. |
-| `infra/main.tf` | Bucket, both Lambdas, HTTP API, IAM, S3 notification |
+| `infra/main.tf` | Bucket, Lambdas, HTTP API, IAM, S3 notification, budget, state backend |
 | `infra/variables.tf` | Tunables — throttle, size caps, retention, origins |
 | `infra/lambda/ingest/index.mjs` | Validates and writes a submission |
-| `infra/lambda/notifier/index.mjs` | manifest.json → Slack message |
+| `infra/lambda/notifier/index.mjs` | manifest.json → Slack message with signed view link |
+| `infra/lambda/viewer/index.mjs` | `GET /view` — checks the signature, returns the case or the original file |
 | `infra/README.md` | Architecture and deploy detail |
 | `.github/workflows/deploy.yml` | Pages deploy on push to `main` |

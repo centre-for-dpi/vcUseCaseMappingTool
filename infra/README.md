@@ -22,11 +22,24 @@ ingest Lambda ──► s3://<bucket>/submissions/YYYY/MM/DD/<submissionId>/
 matches. That gives exactly one Slack message per submission, fired only once
 every file in it is durable.
 
+Each Slack message has a **View use case** button: a signed link that opens
+that one submission read-only in the tool (`GET /view`, served by the viewer
+Lambda). Revoke every link at once with
+`terraform apply -replace=random_password.view_signing_key`.
+
+## State
+
+State lives in `s3://cdpi-terraform-state-770017829617/vc-use-case-mapping-tool/infra.tfstate`
+with S3-native locking (`use_lockfile`, Terraform >= 1.10). The bucket sits
+outside this stack, since Terraform cannot keep state in a bucket it creates.
+It was made once with the AWS CLI: versioning on, SSE-S3, all public access
+blocked, and a policy denying non-TLS requests.
+
 ## Deploy
 
 ```sh
 cp terraform.tfvars.example terraform.tfvars   # add your Slack webhook
-terraform init
+terraform init                                 # connects to the S3 backend
 terraform plan
 terraform apply
 ```

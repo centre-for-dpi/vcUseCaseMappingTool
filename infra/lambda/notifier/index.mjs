@@ -2,10 +2,13 @@
 // submission. Slack failures are logged and swallowed: a broken webhook must
 // never make a submission look failed, the objects are already durable.
 
+import { createHmac } from 'node:crypto';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 
 const s3 = new S3Client({});
 const WEBHOOK = process.env.SLACK_WEBHOOK_URL;
+const SITE_URL = process.env.SITE_URL;
+const VIEW_KEY = process.env.VIEW_SIGNING_KEY;
 
 const TRIGGER_LABELS = {
   finish: 'Finished case',
@@ -26,6 +29,14 @@ function fmtBytes(n) {
 // "<!channel>" pings the whole channel, and "<url|text>" forges a link.
 function esc(value) {
   return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Signed link into the tool's read-only viewer; the viewer Lambda checks the
+// same HMAC. The token sits in the #fragment so it never reaches Pages logs.
+function viewUrl(prefix) {
+  if (!SITE_URL || !VIEW_KEY) return null;
+  const sig = createHmac('sha256', VIEW_KEY).update(prefix).digest('base64url');
+  return `${SITE_URL}/#view=${encodeURIComponent(prefix)}&sig=${sig}`;
 }
 
 async function readManifest(bucket, key) {
@@ -51,6 +62,8 @@ function buildMessage(m, bucket, region) {
     `https://${region}.console.aws.amazon.com/s3/buckets/${bucket}?region=${region}` +
     `&prefix=${encodeURIComponent(m.prefix + '/')}`;
 
+  const view = viewUrl(m.prefix);
+
   return {
     text: `New use case submission: ${name}`,
     blocks: [
@@ -58,11 +71,15 @@ function buildMessage(m, bucket, region) {
       { type: 'section', text: { type: 'mrkdwn', text: `*${name}*` } },
       { type: 'section', text: { type: 'mrkdwn', text: details } },
       { type: 'section', text: { type: 'mrkdwn', text: `*Files*\n${fileLines}` } },
+      view && {
+        type: 'actions',
+        elements: [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: 'View use case' }, url: view }],
+      },
       {
         type: 'context',
         elements: [{ type: 'mrkdwn', text: `<${consoleUrl}|Open in S3> · \`${m.prefix}\`` }],
       },
-    ],
+    ].filter(Boolean),
   };
 }
 
