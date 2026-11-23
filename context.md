@@ -7,18 +7,18 @@ what has to happen to make it live, and the decisions still outstanding.
 
 | Piece | State |
 | --- | --- |
-| Tool hosted on GitHub Pages | **Live** at http://vc.use-case-mapping.cdpi.dev/ |
+| Tool hosted on GitHub Pages | **Live** at https://vc.use-case-mapping.cdpi.dev/ (HTTPS enforced) |
 | Auto-deploy on merge to `main` | **Working** — `.github/workflows/deploy.yml` |
-| Export → S3 → Slack pipeline | **Code complete, not applied** (this PR) |
-| `CDPI_SUBMIT_ENDPOINT` | **Empty** — tool skips submission silently |
+| Export → S3 → Slack pipeline | **Applied** 2026-11-23 in account `770017829617`, `ap-south-1` |
+| `CDPI_SUBMIT_ENDPOINT` | **Set** to `https://70lz6ddo2k.execute-api.ap-south-1.amazonaws.com/submit` |
 
-`terraform validate` passes and `terraform plan` is clean at 20 to add, 0 to
-change, 0 to destroy. No AWS resources have been created.
+Smoke tests passed on apply: a valid submission landed in
+`cdpi-usecase-submissions-770017829617` and posted to Slack; a disallowed
+content type got 415 and a second attachment got 413.
 
-Until `CDPI_SUBMIT_ENDPOINT` is set, `submitToCDPI()` returns early. Merging
-this PR changes nothing observable for users — it only ships the code and the
-Terraform. That separation is deliberate: merge and apply are independent
-decisions.
+Terraform state is local, in `infra/terraform.tfstate` on the applier's
+machine (gitignored). Steps 1–3 below are done; they stay as the record of how
+to redo it.
 
 ## What it does once live
 

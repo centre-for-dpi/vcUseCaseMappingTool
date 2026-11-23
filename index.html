@@ -1410,7 +1410,7 @@ function renderPriority(){
 // Every export posts the case JSON plus the exported file to the collection
 // endpoint, which lands them in S3. Set this to the `submit_endpoint` output of
 // infra/ (`terraform -chdir=infra output submit_endpoint`).
-var CDPI_SUBMIT_ENDPOINT = ''; // e.g. 'https://abc123.execute-api.ap-south-1.amazonaws.com/submit'
+var CDPI_SUBMIT_ENDPOINT = 'https://70lz6ddo2k.execute-api.ap-south-1.amazonaws.com/submit';
 var CDPI_SUBMIT_LOG_KEY = 'vc-uc-cdpi-log';
 var CDPI_MAX_FILE_BYTES = 3145728; // keep in sync with max_file_bytes in infra/variables.tf
 
