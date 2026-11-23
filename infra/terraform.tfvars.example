@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars (gitignored) and fill in before applying.
+
+# Slack incoming webhook for the channel that should receive submissions.
+# Create at https://api.slack.com/messaging/webhooks — the real value looks like
+# https://hooks.slack.com/services/<team-id>/<channel-id>/<token>
+slack_webhook_url = "REPLACE_WITH_SLACK_WEBHOOK_URL"
+
+# Origins allowed to POST to the submit endpoint. Add localhost while testing.
+# allowed_origins = ["https://vc.use-case-mapping.cdpi.dev", "http://localhost:8000"]
+
+# aws_profile = "cdpi"
+# aws_region  = "ap-south-1"
