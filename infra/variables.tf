@@ -25,11 +25,9 @@ variable "slack_webhook_url" {
 variable "allowed_origins" {
   description = "Origins allowed to POST to the submit endpoint (browser CORS)."
   type        = list(string)
-  # Pages serves the tool from the custom domain. The http:// entry covers
-  # visitors who arrive before "Enforce HTTPS" is switched on.
+  # Pages serves the tool from the custom domain, with HTTPS enforced.
   default = [
     "https://vc.use-case-mapping.cdpi.dev",
-    "http://vc.use-case-mapping.cdpi.dev",
   ]
 }
 
