@@ -68,3 +68,21 @@ variable "noncurrent_version_retention_days" {
   type        = number
   default     = 90
 }
+
+variable "site_url" {
+  description = "Public URL of the tool; signed view links in Slack open here."
+  type        = string
+  default     = "https://vc.use-case-mapping.cdpi.dev"
+}
+
+variable "budget_limit_usd" {
+  description = "Monthly budget for resources tagged Project=vc-use-case-mapping-tool."
+  type        = number
+  default     = 100
+}
+
+variable "budget_alert_emails" {
+  description = "Who is emailed at 80% and 100% of actual spend, and when spend is forecast to pass 100%."
+  type        = list(string)
+  default     = ["antony@cdpi.dev"]
+}

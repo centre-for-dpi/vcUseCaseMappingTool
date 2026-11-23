@@ -1,5 +1,19 @@
 terraform {
-  required_version = ">= 1.5"
+  # 1.10+ for S3-native state locking (use_lockfile), no DynamoDB table needed.
+  required_version = ">= 1.10"
+
+  # The state bucket is created outside this stack (see README.md, "State"),
+  # since Terraform cannot store its state in a bucket it is about to create.
+  # Override the profile with -backend-config="profile=<name>" if yours differs.
+  backend "s3" {
+    bucket       = "cdpi-terraform-state-770017829617"
+    key          = "vc-use-case-mapping-tool/infra.tfstate"
+    region       = "ap-south-1"
+    profile      = "cdpi"
+    encrypt      = true
+    use_lockfile = true
+  }
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -8,6 +22,10 @@ terraform {
     archive = {
       source  = "hashicorp/archive"
       version = "~> 2.4"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
     }
   }
 }
@@ -160,7 +178,7 @@ resource "aws_apigatewayv2_api" "submit" {
 
   cors_configuration {
     allow_origins = var.allowed_origins
-    allow_methods = ["POST", "OPTIONS"]
+    allow_methods = ["GET", "POST", "OPTIONS"]
     allow_headers = ["content-type"]
     max_age       = 3600
   }
@@ -262,6 +280,8 @@ resource "aws_lambda_function" "notifier" {
   environment {
     variables = {
       SLACK_WEBHOOK_URL = var.slack_webhook_url
+      SITE_URL          = var.site_url
+      VIEW_SIGNING_KEY  = random_password.view_signing_key.result
       BUCKET            = aws_s3_bucket.submissions.id
     }
   }
@@ -288,4 +308,146 @@ resource "aws_s3_bucket_notification" "submissions" {
   }
 
   depends_on = [aws_lambda_permission.s3_notifier]
+}
+
+# ---------------------------------------------------------------------------
+# Viewer — GET /view behind the signed links in each Slack message. Opens one
+# submission read-only in the tool. Replace the key to revoke every link:
+#   terraform apply -replace=random_password.view_signing_key
+# ---------------------------------------------------------------------------
+
+resource "random_password" "view_signing_key" {
+  length  = 48
+  special = false
+}
+
+data "archive_file" "viewer" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/viewer"
+  output_path = "${path.module}/.build/viewer.zip"
+}
+
+resource "aws_iam_role" "viewer" {
+  name = "${local.name}-viewer"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "viewer" {
+  name = "read-submissions"
+  role = aws_iam_role.viewer.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${aws_s3_bucket.submissions.arn}/submissions/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "${aws_cloudwatch_log_group.viewer.arn}:*"
+      }
+    ]
+  })
+}
+
+resource "aws_cloudwatch_log_group" "viewer" {
+  name              = "/aws/lambda/${local.name}-viewer"
+  retention_in_days = var.log_retention_days
+}
+
+resource "aws_lambda_function" "viewer" {
+  function_name    = "${local.name}-viewer"
+  role             = aws_iam_role.viewer.arn
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  filename         = data.archive_file.viewer.output_path
+  source_code_hash = data.archive_file.viewer.output_base64sha256
+  timeout          = 10
+  memory_size      = 256
+
+  environment {
+    variables = {
+      BUCKET           = aws_s3_bucket.submissions.id
+      VIEW_SIGNING_KEY = random_password.view_signing_key.result
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_group.viewer]
+}
+
+resource "aws_apigatewayv2_integration" "view" {
+  api_id                 = aws_apigatewayv2_api.submit.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.viewer.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "view" {
+  api_id    = aws_apigatewayv2_api.submit.id
+  route_key = "GET /view"
+  target    = "integrations/${aws_apigatewayv2_integration.view.id}"
+}
+
+resource "aws_lambda_permission" "apigw_viewer" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.viewer.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.submit.execution_arn}/*/*"
+}
+
+# ---------------------------------------------------------------------------
+# Budget — monthly cost of this tool's resources, found by the Project tag
+# that default_tags puts on everything above.
+#
+# This account is a member of an AWS Organization, so the "Project" cost
+# allocation tag can only be activated from the management account
+# (730335413791): Billing -> Cost allocation tags -> Project -> Activate.
+# Until that is done the budget counts $0 and never alerts.
+# ---------------------------------------------------------------------------
+
+resource "aws_budgets_budget" "monthly" {
+  name         = "${local.name}-monthly"
+  budget_type  = "COST"
+  limit_amount = tostring(var.budget_limit_usd)
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
+
+  cost_filter {
+    name   = "TagKeyValue"
+    values = ["user:Project$vc-use-case-mapping-tool"]
+  }
+
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 80
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = var.budget_alert_emails
+  }
+
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 100
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = var.budget_alert_emails
+  }
+
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 100
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "FORECASTED"
+    subscriber_email_addresses = var.budget_alert_emails
+  }
 }
